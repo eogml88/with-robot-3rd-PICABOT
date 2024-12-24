@@ -17,18 +17,40 @@ from util import State, Config, Context, ReadData, ControlData
 PI_HALF = np.pi / 2
 config: Config = Config()
 visual_objects = [None] * 128
-TARGET = np.array(
-    [
-        [49.0, 137.0],
-        [110.0, 139.0],
-        [109.0, 193.0],
-        [52.0, 191.0],
-        [159.0, 87.0],
-        [223.0, 90.0],
-        [214.0, 150.0],
-        [154.0, 148.0],
+TARGET = [
+    np.array([[49.0, 137.0], # 0
+              [110.0, 139.0],
+              [109.0, 193.0],
+              [52.0, 191.0],
+              [159.0, 87.0],
+              [223.0, 90.0],
+              [214.0, 150.0],
+              [154.0, 148.0]]),
+    np.array([[123.0, 210.0], # 90
+              [123.0, 162.0],
+              [180.0, 162.0],
+              [176.0, 210.0],
+              [70.0, 121.0],
+              [66.0, 58.0],
+              [131.0, 58.0],
+              [131.0, 121.0]]),
+    np.array([[132.0, 58.0], # -90
+              [131.0, 121.0],
+              [71.0, 121.0],
+              [66.0, 58.0],
+              [181.0, 162.0],
+              [177.0, 210.0],
+              [124.0, 210.0],
+              [124.0, 162.0]]),
+    np.array([[208.0, 146.0], # 180
+              [150.0, 146.0],
+              [151.0, 88.0],
+              [214.0, 88.0],
+              [107.0, 191.0],
+              [53.0, 190.0],
+              [47.0, 139.0],
+              [106.0, 139.0]])
     ]
-)
 
 
 # find target
@@ -196,8 +218,8 @@ def pick_target(context: Context, youbot_data: ReadData, f_len: float):
     if context.state_counter == 1:
         context.mainpulator_state = 0
     if context.mainpulator_state == 2:
-        if len(TARGET) == len(context.pixelPositions):
-            pixel_error = np.linalg.norm(TARGET - np.array(context.pixelPositions))
+        if len(TARGET[context.targetIndex]) == len(context.pixelPositions):
+            pixel_error = np.linalg.norm(TARGET[context.targetIndex] - np.array(context.pixelPositions))
             print("pixel error", pixel_error)
             if pixel_error < config.ibvs_threshold:
                 context.mainpulator_state += 1
@@ -215,9 +237,22 @@ def pick_target(context: Context, youbot_data: ReadData, f_len: float):
         target_thetas = solve(youbot_data.joints, pt_hat)
         control_data.joints_position = target_thetas
         context.tmp_target_theta = target_thetas
+        print("target theta",np.round(np.degrees(target_thetas),2))
+        # find best target index
     #### this section will be changed by visual servoing ####
     # move joint to target position
     elif context.mainpulator_state == 2:
+        if context.targetIndex == -1:
+            bgr_img = youbot_data.img[:, :, ::-1]
+            pixelPositions = detect_features(bgr_img)
+            targetIndex, minPixelError = 0, 1e10
+            for i,targetPixels in enumerate(TARGET):
+                pixel_error = np.linalg.norm(targetPixels - np.array(pixelPositions))
+                if pixel_error < minPixelError:
+                    minPixelError = pixel_error
+                    targetIndex = i
+            context.targetIndex = targetIndex
+            print("target index :", targetIndex)
         control_data.delta = 0.005
         tmp_target_theta = context.tmp_target_theta
         # read youbot data
@@ -226,17 +261,19 @@ def pick_target(context: Context, youbot_data: ReadData, f_len: float):
         # detect feature
         pixelPositions = detect_features(bgr_img)
         context.pixelPositions = pixelPositions
-        if len(pixelPositions) < 8:
+        if len(context.pixelPositions) < 8:
             pt_hat = context.target_location.copy()
             pt_hat[-1] = config.target_height
             target_thetas = solve(youbot_data.joints, pt_hat)
             control_data.joints_position = target_thetas
             context.tmp_target_theta = target_thetas
         else:
-            pt_hat = calculateTarget(pixelPositions, youbotJoints, f_len)
+            targetPixels = TARGET[context.targetIndex]
+            pt_hat = calculateTarget(pixelPositions, targetPixels, youbotJoints, f_len)
             target_thetas = solve_close(youbot_data.joints, pt_hat, tmp_target_theta)
             control_data.joints_position = target_thetas
             context.tmp_target_theta = target_thetas
+            print("ibvs target theta",np.round(np.degrees(target_thetas),2))
     #########################################################
     # grip target
     elif context.mainpulator_state == 3:
@@ -568,10 +605,10 @@ def getImageJacobian(z, u, v, f_len):
     return img_jacobian
 
 
-def CalculateJacobian(PixelPositions, cam_position, f_len):
+def CalculateJacobian(PixelPositions, targetPixels, cam_position, f_len):
     x, y, z = cam_position
     img_jacobians = []
-    for position, t_position in zip(PixelPositions, TARGET):
+    for position, t_position in zip(PixelPositions, targetPixels):
         u, v = position
         tu, tv = t_position
         img_jacobian = getImageJacobian(z, u, v, f_len)
@@ -581,15 +618,15 @@ def CalculateJacobian(PixelPositions, cam_position, f_len):
     return img_jacobians
 
 
-def calculateTarget(pixelPositions, joints, f_len):
+def calculateTarget(pixelPositions, targetPixels, joints, f_len):
     # get camera localization
     _, c_hat, cam_orien = fk(joints[1:5], [joints[0]])
     targetPose = np.concatenate((c_hat[:3], cam_orien))
     # update target camera localization
     cam_position = targetPose[:3]
-    J = CalculateJacobian(pixelPositions, cam_position, f_len)
+    J = CalculateJacobian(pixelPositions, targetPixels, cam_position, f_len)
     if len(J) > 0:
-        velPixel = (TARGET - np.array(pixelPositions)).flatten()
+        velPixel = (targetPixels - np.array(pixelPositions)).flatten()
         Jpinv = np.linalg.pinv(J)
         velCam = Jpinv @ velPixel
         # print("output",velCam[:3],np.degrees(velCam[3:]))

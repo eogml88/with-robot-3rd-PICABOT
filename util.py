@@ -83,6 +83,7 @@ class Context:
 
     tmp_target_theta: np.array = None
     pixelPositions = []
+    targetIndex : int = -1
 
     car_state: int = 0
     path_planning_state: bool = True

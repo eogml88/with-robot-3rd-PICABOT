@@ -30,9 +30,12 @@ app = Flask(__name__)
 #
 class PickAndPlace:
     def __init__(self):
+        print("class PickAndPlace instance generated.")
         # coppeliasim simulation instance
         self.sim = RemoteAPIClient().require("sim")
+        print(f"PickAndPlace member sim: {self.sim}")
         self.simOMPL = RemoteAPIClient().require("simOMPL")
+        print(f"PickAndPlace member simOMPL: {self.simOMPL}")
         # Context of Robot
         self.context = Context()
         # Simulation run flag
@@ -568,6 +571,7 @@ if __name__ == "__main__":
     threading.Thread(
         target=lambda: app.run(
             host="0.0.0.0", port=5555, debug=False, use_reloader=False
+            # host="127.0.0.1", port=5555, debug=False, use_reloader=False
         ),
         daemon=True,
     ).start()

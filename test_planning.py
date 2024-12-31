@@ -36,15 +36,9 @@ class TestPlanning:
     # 현재는 임의 생성
     #
     def read_map(self):
-        map = np.full(self.config.map_size, 10.0)
-        # make wall
-        map[15:86, 50] = 0
-        map[15, 50:85] = 0
-        map[85, 50:85] = 0
-        map[15:70, 85] = 0
-        map[70, 60:85] = 0
-        map[25:70, 60] = 0
-        return map
+        with open("mapping.npy", "rb") as f:
+            map = np.load(f)
+        return map >= 0
 
     #
     # wall 기준 0.3미터 거리를 masking
@@ -52,7 +46,7 @@ class TestPlanning:
     def make_map_mask(self, map):
         # make mask
         n_row, n_col = map.shape
-        walls = np.argwhere(map == 0)
+        walls = np.argwhere(map == 1)
         masks = np.zeros_like(map)
         masks[:3, :] = 1
         masks[-3:, :] = 1
@@ -63,20 +57,20 @@ class TestPlanning:
                 max(x - 3, 0) : min(x + 4, n_row + 1),
                 max(y - 3, 0) : min(y + 4, n_col + 1),
             ] = 1
-        masks *= map != 0
-        map[masks > 0] = 0.0
+        masks *= map != 1
+        map[masks > 0] = 1.0
         return map
 
     #
-    # 벨만최적방정식을 이용한 planning
+    # 벨만최적방정식을 이용한 map value 계산
     #
-    def planning(self, map_mask, start, end):
+    def calc_map_value(self, map_mask, end):
         n_row, n_col = map_mask.shape
-        v_prev = np.zeros_like(map_mask)
-        v_next = np.zeros_like(map_mask)
+        v_prev = np.zeros(map_mask.shape)
+        v_next = np.zeros(map_mask.shape)
 
         def cal_value(row, col):
-            if map_mask[row, col] == 0.0:
+            if map_mask[row, col] == 1.0:
                 return -n_row * n_col
             prev_row = max(0, row - 1)
             next_row = min(n_row - 1, row + 1)
@@ -96,11 +90,11 @@ class TestPlanning:
 
             loc_value = []
             for loc in loc_list:
-                value = -1 + (v_prev[row, col] if map_mask[loc] == 0.0 else v_prev[loc])
+                value = -1 + (v_prev[row, col] if map_mask[loc] == 1.0 else v_prev[loc])
                 loc_value.append(value)
             return max(loc_value)
 
-        for _ in range(10000):
+        for _ in range(1000):
             v_next.fill(0.0)
             for row in range(n_row):
                 for col in range(n_col):
@@ -116,20 +110,15 @@ class TestPlanning:
         return v_next
 
     #
-    # 시각화
+    # map_value 이용한 path 계산
     #
-    def visualize(self, map_mask, map_value, start, end):
-        for i in range(len(self.plt_objs)):
-            if self.plt_objs[i] is None:
-                break
-            self.plt_objs[i].remove()
-            self.plt_objs[i] = None
-
+    def calc_map_path(self, map_value, start, end):
         checked = set()
-        n_row, n_col = map_mask.shape
+        n_row, n_col = map_value.shape
         position = start
+        map_path = []
         for i in range(1000):
-            map_mask[position] = 20
+            map_path.append(position)
             if position == end:
                 break
             row, col = position
@@ -160,8 +149,21 @@ class TestPlanning:
 
             index = np.argmax(loc_value)
             position = loc_list[index]
+        return np.array(map_path)
 
-        self.plt_objs[0] = plt.pcolor(self.MAP_R, self.MAP_P, map_mask, cmap="gray")
+    #
+    # 시각화
+    #
+    def visualize(self, map, map_path):
+        map[map_path[:, 0], map_path[:, 1]] = 0.5
+
+        for i in range(len(self.plt_objs)):
+            if self.plt_objs[i] is None:
+                break
+            self.plt_objs[i].remove()
+            self.plt_objs[i] = None
+
+        self.plt_objs[0] = plt.pcolor(self.MAP_R, self.MAP_P, map * -1, cmap="gray")
         plt.axis("off")
         plt.axis("equal")
         plt.pause(0.01)
@@ -172,14 +174,16 @@ class TestPlanning:
 
         # initial data
         map_mask = self.make_map_mask(self.context.map.copy())
-        start = (50, 10)
-        end = (50, 80)
+        # start = (60, 50)
+        start = self.config.place["belcony_end"]
+        end = self.config.place["bedroom1"]
         # planning
-        map_value = self.planning(map_mask, start, end)
+        map_value = self.calc_map_value(map_mask, end)
+        map_path = self.calc_map_path(map_value, start, end)
 
         # visualize
         while self.run_flag:
-            self.visualize(self.context.map.copy(), map_value, start, end)
+            self.visualize(self.context.map.copy(), map_path)
             time.sleep(0.1)
 
 

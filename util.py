@@ -32,6 +32,16 @@ class Config:
     map_cell: float = 0.1
     lidar_offset: float = 0.2751  # distance from youBot_ref to lidar
     lidar_pcd: int = 342 * 2  # Point Cloud Density
+    place = {
+        "bedroom1": (40, 15),
+        "bedroom2": (75, 10),
+        "toilet": (85, 30),
+        "enterance": (80, 50),
+        "dining": (91, 80),
+        "lvingroom": (30, 85),
+        "belcony_init": (5, 65),
+        "belcony_end": (5, 20),
+    }
 
 
 #
